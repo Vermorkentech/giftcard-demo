@@ -19,8 +19,10 @@ import com.vaadin.ui.VerticalLayout;
 import io.axoniq.demo.giftcard.api.CardSummary;
 import io.axoniq.demo.giftcard.api.CountCardSummariesQuery;
 import io.axoniq.demo.giftcard.api.CountCardSummariesResponse;
-import io.axoniq.demo.giftcard.api.IssueCommand;
-import io.axoniq.demo.giftcard.api.RedeemCommand;
+import io.axoniq.demo.giftcard.api.IssueCardCommand;
+import io.axoniq.demo.giftcard.api.RedeemCardCommand;
+import org.axonframework.axonserver.connector.ErrorCode;
+import org.axonframework.commandhandling.CommandExecutionException;
 import org.axonframework.commandhandling.gateway.CommandGateway;
 import org.axonframework.queryhandling.QueryGateway;
 import org.slf4j.Logger;
@@ -94,7 +96,7 @@ public class GiftCardUI extends UI {
         setPollInterval(1000);
         getSession().getSession().setMaxInactiveInterval(30);
         addDetachListener((DetachListener) detachEvent -> {
-            logger.warn("Closing UI");
+            logger.info("Closing UI");
             updaterThread.cancel(true);
         });
     }
@@ -105,7 +107,21 @@ public class GiftCardUI extends UI {
         Button submit = new Button("Submit");
 
         submit.addClickListener(evt -> {
-            commandGateway.sendAndWait(new IssueCommand(id.getValue(), Integer.parseInt(amount.getValue())));
+            try {
+                commandGateway.sendAndWait(new IssueCardCommand(id.getValue(), Integer.parseInt(amount.getValue())));
+            } catch (CommandExecutionException e) {
+                String message = e.getMessage();
+                if (message.contains(ErrorCode.INVALID_EVENT_SEQUENCE.errorCode())) {
+                    throw new IllegalStateException(
+                            "An event for aggregate [" + id.getValue() + "] at sequence ["
+                                    + message.substring(message.length() - 1) + "] was already inserted."
+                                    + "You are either reusing the aggregate identifier "
+                                    + "or concurrently dispatching commands for the same aggregate."
+                    );
+                } else {
+                    throw e;
+                }
+            }
             Notification.show("Success", Notification.Type.HUMANIZED_MESSAGE)
                         .addCloseListener(e -> cardSummaryDataProvider.refreshAll());
         });
@@ -164,7 +180,7 @@ public class GiftCardUI extends UI {
         Button submit = new Button("Submit");
 
         submit.addClickListener(evt -> {
-            commandGateway.sendAndWait(new RedeemCommand(id.getValue(), Integer.parseInt(amount.getValue())));
+            commandGateway.sendAndWait(new RedeemCardCommand(id.getValue(), Integer.parseInt(amount.getValue())));
             Notification.show("Success", Notification.Type.HUMANIZED_MESSAGE)
                         .addCloseListener(e -> cardSummaryDataProvider.refreshAll());
         });
